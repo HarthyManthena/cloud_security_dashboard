@@ -4,35 +4,50 @@ import time
 import random
 import matplotlib.pyplot as plt
 
-# Load Dataset
+# PAGE CONFIG
+st.set_page_config(page_title="Cloud Security SOC", layout="wide")
+
+# CUSTOM CSS (Dark SOC Style)
+st.markdown("""
+    <style>
+    body {
+        background-color: #0e1117;
+        color: white;
+    }
+    .metric-box {
+        padding: 15px;
+        border-radius: 10px;
+        background-color: #1c1f26;
+        text-align: center;
+        color: white;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# TITLE
+st.title(" Cognitive Multi-Cloud Security Dashboard")
+
+# LOAD DATA
 df = pd.read_csv("multi_cloud_dataset_10000.csv")
 
-# Convert IP to numeric
-def ip_to_numeric(ip):
-    parts = ip.split(".")
-    return int(parts[0])*256**3 + int(parts[1])*256**2 + int(parts[2])*256 + int(parts[3])
+# SIDEBAR
+st.sidebar.header(" Control Panel")
+run = st.sidebar.checkbox("Start Monitoring")
 
-df["sourceIP"] = df["sourceIP"].apply(ip_to_numeric)
+# KPI counters
+block_count = 0
+mfa_count = 0
+allow_count = 0
 
-# Encode categorical columns
-from sklearn.preprocessing import LabelEncoder
+# placeholders
+table_placeholder = st.empty()
+chart_placeholder = st.empty()
 
-le_event = LabelEncoder()
-le_region = LabelEncoder()
-le_user = LabelEncoder()
-le_cloud = LabelEncoder()
+scores = []
+data_table = []
 
-df["eventName"] = le_event.fit_transform(df["eventName"])
-df["region"] = le_region.fit_transform(df["region"])
-df["userType"] = le_user.fit_transform(df["userType"])
-df["cloudProvider"] = le_cloud.fit_transform(df["cloudProvider"])
-
-df["label"] = df["label"].map({"Normal": 0, "Suspicious": 1})
-
-X = df.drop("label", axis=1)
-
-# Dummy Prediction Function
-def predict_event(sample):
+# DUMMY PREDICTION
+def predict_event():
     score = round(random.uniform(0, 1), 3)
 
     if score < 0.4:
@@ -44,52 +59,55 @@ def predict_event(sample):
 
     return score, decision
 
-# Streamlit UI
-st.set_page_config(page_title="Cloud Security Dashboard", layout="wide")
+# KPI SECTION
+col1, col2, col3 = st.columns(3)
 
-st.title(" Cognitive Multi-Cloud Security Dashboard")
+block_metric = col1.empty()
+mfa_metric = col2.empty()
+allow_metric = col3.empty()
 
-# Sidebar
-st.sidebar.header("Controls")
-run = st.sidebar.checkbox("Start Live Monitoring")
-
-block_count = 0
-mfa_count = 0
-
-table_placeholder = st.empty()
-chart_placeholder = st.empty()
-
-scores = []
-data_table = []
-
-# Live Simulation
+# LIVE SIMULATION
 if run:
     for i in range(50):
-        sample = X.sample(1).iloc[0].to_dict()
 
-        score, decision = predict_event(sample)
+        score, decision = predict_event()
 
         if decision == "BLOCK":
             block_count += 1
         elif decision == "MFA REQUIRED":
             mfa_count += 1
+        else:
+            allow_count += 1
 
+        # Update table
         data_table.append({
+            "Event ID": i+1,
             "Risk Score": score,
             "Decision": decision
         })
 
-        scores.append(score)
-
         df_display = pd.DataFrame(data_table)
-        table_placeholder.dataframe(df_display)
+        table_placeholder.dataframe(df_display, use_container_width=True)
 
-        st.sidebar.metric(" BLOCK", block_count)
-        st.sidebar.metric(" MFA", mfa_count)
+        # Update KPIs
+        block_metric.metric(" BLOCKED", block_count)
+        mfa_metric.metric(" MFA REQUIRED", mfa_count)
+        allow_metric.metric(" ALLOWED", allow_count)
+
+        # Risk trend chart
+        scores.append(score)
 
         fig, ax = plt.subplots()
         ax.plot(scores)
-        ax.set_title("Risk Score Trend")
+        ax.set_title(" Risk Score Trend")
+        ax.set_xlabel("Events")
+        ax.set_ylabel("Risk Score")
         chart_placeholder.pyplot(fig)
+
+        # Alert system
+        if decision == "BLOCK":
+            st.error(f" High Risk Activity Detected! Score: {score}")
+        elif decision == "MFA REQUIRED":
+            st.warning(f" Medium Risk - MFA Required (Score: {score})")
 
         time.sleep(1)
