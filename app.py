@@ -1,113 +1,191 @@
 import streamlit as st
 import pandas as pd
-import time
+import numpy as np
+import joblib
+import plotly.express as px
 import random
-import matplotlib.pyplot as plt
 
 # PAGE CONFIG
-st.set_page_config(page_title="Cloud Security SOC", layout="wide")
+st.set_page_config(page_title="AWS Security SOC", layout="wide")
 
-# CUSTOM CSS (Dark SOC Style)
+
+# LOGIN SYSTEM
+def login():
+    st.title(" Admin Login")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username == "admin" and password == "admin123":
+            st.session_state["login"] = True
+        else:
+            st.error("Invalid Credentials")
+
+if "login" not in st.session_state:
+    st.session_state["login"] = False
+
+if not st.session_state["login"]:
+    login()
+    st.stop()
+
+# AWS STYLE UI
 st.markdown("""
     <style>
-    body {
-        background-color: #0e1117;
-        color: white;
-    }
-    .metric-box {
-        padding: 15px;
-        border-radius: 10px;
-        background-color: #1c1f26;
-        text-align: center;
-        color: white;
-    }
+    body {background-color: #0e1117; color: white;}
+    .stMetric {background-color:#1c1f26; padding:10px; border-radius:10px;}
     </style>
 """, unsafe_allow_html=True)
 
-# TITLE
-st.title(" Cognitive Multi-Cloud Security Dashboard")
+st.title(" Multi-Cloud Security ")
 
-# LOAD DATA
-df = pd.read_csv("multi_cloud_dataset_10000.csv")
+# LOAD MODELS & DATA
+@st.cache_resource
+def load_models():
+    rf_model = joblib.load("rf_model.pkl")
+    svm_model = joblib.load("svm_model.pkl")
+    iso_model = joblib.load("iso_model.pkl")
+    scaler = joblib.load("scaler.pkl")
+    return rf_model, svm_model, iso_model, scaler
 
-# SIDEBAR
-st.sidebar.header(" Control Panel")
-run = st.sidebar.checkbox("Start Monitoring")
+rf_model, svm_model, iso_model, scaler = load_models()
 
-# KPI counters
-block_count = 0
-mfa_count = 0
-allow_count = 0
+@st.cache_data
+def load_data():
+    return pd.read_csv("multi_cloud_dataset_10000.csv")
 
-# placeholders
-table_placeholder = st.empty()
-chart_placeholder = st.empty()
+rf_model, svm_model, iso_model, scaler = load_models()
+df = load_data()
 
-scores = []
-data_table = []
+# PREDICTION FUNCTION
+def predict_event(features, rf_model, svm_model, iso_model, scaler):
+    import numpy as np
 
-# DUMMY PREDICTION
-def predict_event():
-    score = round(random.uniform(0, 1), 3)
+    features = scaler.transform([features])
 
-    if score < 0.4:
+    # RF
+    rf_score = rf_model.predict_proba(features)[0][1]
+
+    # SVM
+    try:
+        svm_score = svm_model.predict_proba(features)[0][1]
+    except:
+        svm_score = svm_model.decision_function(features)[0]
+        svm_score = 1 / (1 + np.exp(-svm_score))
+
+    # Isolation Forest
+    iso_score = iso_model.decision_function(features)[0]
+    iso_score = (iso_score + 1) / 2
+
+    # Final Score
+    import random
+
+    base_score = (rf_score + svm_score + iso_score) / 3
+
+    # Add randomness
+    noise = random.uniform(-0.3, 0.3)
+    final_score = base_score + noise
+
+    # Clamp between 0 and 1
+    final_score = max(0, min(1, final_score))
+
+    if final_score < 0.4:
         decision = "ALLOW"
-    elif score < 0.7:
+    elif final_score < 0.7:
         decision = "MFA REQUIRED"
     else:
         decision = "BLOCK"
 
-    return score, decision
+    return final_score, decision
 
-# KPI SECTION
-col1, col2, col3 = st.columns(3)
+# SIDEBAR CONTROLS
+st.sidebar.header(" Controls")
+num_events = st.sidebar.slider("Events", 5, 50, 15)
 
-block_metric = col1.empty()
-mfa_metric = col2.empty()
-allow_metric = col3.empty()
+# KPI VARIABLES
+total = 0
+blocked = 0
+mfa = 0
+allowed = 0
+
+results = []
 
 # LIVE SIMULATION
-if run:
-    for i in range(50):
+st.subheader(" Live Security Events")
 
-        score, decision = predict_event()
+for i in range(num_events):
+    row_df = df.sample(1).drop("label", axis=1)
 
-        if decision == "BLOCK":
-            block_count += 1
-        elif decision == "MFA REQUIRED":
-            mfa_count += 1
-        else:
-            allow_count += 1
+    # Convert categorical → numeric
+    row_df = row_df.apply(lambda x: pd.factorize(x)[0])
 
-        # Update table
-        data_table.append({
-            "Event ID": i+1,
-            "Risk Score": score,
-            "Decision": decision
-        })
+    row = row_df.values[0]
 
-        df_display = pd.DataFrame(data_table)
-        table_placeholder.dataframe(df_display, use_container_width=True)
+    score, decision = predict_event(row, rf_model, svm_model, iso_model, scaler)
 
-        # Update KPIs
-        block_metric.metric(" BLOCKED", block_count)
-        mfa_metric.metric(" MFA REQUIRED", mfa_count)
-        allow_metric.metric(" ALLOWED", allow_count)
+    total += 1
+    if decision == "BLOCK":
+        blocked += 1
+        st.error(f" HIGH RISK detected (Score: {round(score,2)})")
+    elif decision == "MFA REQUIRED":
+        mfa += 1
+        st.warning(f" Medium Risk (Score: {round(score,2)})")
+    else:
+        allowed += 1
 
-        # Risk trend chart
-        scores.append(score)
+    results.append({
+        "Event": i+1,
+        "Risk Score": round(score, 2),
+        "Decision": decision,
+        "Latitude": random.uniform(-90, 90),
+        "Longitude": random.uniform(-180, 180)
+    })
 
-        fig, ax = plt.subplots()
-        ax.plot(scores)
-        ax.set_title(" Risk Score Trend")
-        ax.set_xlabel("Events")
-        ax.set_ylabel("Risk Score")
-        chart_placeholder.pyplot(fig)
+# KPI DASHBOARD
+col1, col2, col3, col4 = st.columns(4)
 
-        # Alert system
-        if decision == "BLOCK":
-            st.error(f" High Risk Activity Detected! Score: {score}")
-        elif decision == "MFA REQUIRED":
-            st.warning(f" Medium Risk - MFA Required (Score: {score})")
+col1.metric("Total Events", total)
+col2.metric("Blocked", blocked)
+col3.metric("MFA", mfa)
+col4.metric("Allowed", allowed)
 
-        time.sleep(1)
+result_df = pd.DataFrame(results)
+
+# TABLE
+st.dataframe(result_df, use_container_width=True)
+
+# PIE CHART
+st.subheader(" Decision Distribution")
+
+fig1 = px.pie(result_df, names="Decision")
+st.plotly_chart(fig1, use_container_width=True)
+
+# TIME SERIES GRAPH
+st.subheader(" Risk Trend Over Time")
+
+fig2 = px.line(result_df, x="Event", y="Risk Score")
+st.plotly_chart(fig2, use_container_width=True)
+
+# ATTACK MAP
+st.subheader(" Attack Location Map")
+
+map_df = result_df.rename(columns={
+    "Latitude": "lat",
+    "Longitude": "lon"
+})[["lat", "lon"]]
+
+st.map(map_df)
+
+# DOWNLOAD REPORT
+csv = result_df.to_csv(index=False)
+
+st.download_button(
+    label=" Download Report",
+    data=csv,
+    file_name="security_report.csv",
+    mime="text/csv"
+)
+
+# REFRESH
+if st.button(" Refresh Dashboard"):
+    st.rerun()
