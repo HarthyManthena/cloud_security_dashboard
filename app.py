@@ -6,7 +6,7 @@ import plotly.express as px
 import random
 
 # PAGE CONFIG
-st.set_page_config(page_title="AWS Security SOC", layout="wide")
+st.set_page_config(page_title="Multi-Cloud Security", layout="wide")
 
 
 # LOGIN SYSTEM
