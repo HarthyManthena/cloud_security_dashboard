@@ -1,7 +1,5 @@
-app.py
-multi_cloud_dataset_10000.csv
-rf_model.pkl
-SVM_model.pkl
-iso_model.pkl
-scaler.pkl
-requirements.txt
+streamlit
+pandas
+numpy
+scikit-learn
+matplotlib
